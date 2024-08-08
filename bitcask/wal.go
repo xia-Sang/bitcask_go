@@ -1,7 +1,6 @@
 package bitcask
 
 import (
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -83,45 +82,10 @@ func restore(r io.ReaderAt, offset, length uint32) (*Record, error) {
 func (w *WalWriter) Restore(offset, length uint32) (*Record, error) {
 	return restore(w.dest, offset, length)
 }
-func (r *WalReader) Restore(offset, length uint32) (*Record, error) {
-	return restore(r.src, offset, length)
+func (w *WalReader) Restore(offset, length uint32) (*Record, error) {
+	return restore(w.src, offset, length)
 }
 
-// 读取wal信息返回[]*record即可
-func readWal(f io.ReadSeeker) ([]*Record, error) {
-	var n uint32
-	var err error
-	var data []byte
-	var records []*Record
-	for {
-		if err = binary.Read(f, binary.LittleEndian, &n); err != nil {
-			if err == io.EOF {
-				break
-			}
-			return nil, err
-		}
-		if n == 0 {
-			break
-		}
-		if cap(data) < int(n) {
-			data = make([]byte, n)
-		} else {
-			data = data[:n]
-		}
-
-		if _, err = f.Read(data); err != nil {
-			if err == io.EOF {
-				break
-			}
-			return nil, err
-		}
-		record := &Record{}
-		record.Restore(data)
-		records = append(records, record)
-	}
-
-	return records, nil
-}
 func (w *WalReader) Clear() {
 	_ = w.src.Close()
 	_ = os.Remove(w.fileName)

@@ -1,12 +1,12 @@
 package bitcask
 
 import (
-	"fmt"
 	"math"
 	"os"
 	"path"
 	"sort"
 	"sync"
+	"sync/atomic"
 )
 
 type BitCask struct {
@@ -16,6 +16,7 @@ type BitCask struct {
 	walReader     map[string]*WalReader
 	walWriter     *WalWriter
 	memTableIndex uint32
+	batchSeq      atomic.Uint32
 }
 
 func (bc *BitCask) getMaxWalSize() uint32 {
@@ -47,37 +48,46 @@ func NewBitCask(opts *Options) (*BitCask, error) {
 	return bc, nil
 }
 func (bc *BitCask) Set(key, value []byte) error {
-	bc.tryToFreshMemTable()
 
-	bc.lock.Lock()
-	defer bc.lock.Unlock()
 	record := &Record{
 		Key:   key,
 		Value: value,
 		RType: RecordUpdate,
 	}
-	pos, err := bc.walWriter.Write(record)
-	if err != nil {
+	if err := bc.set(record); err != nil {
 		return err
 	}
-	bc.memtable.Set(&RecordPos{Key: key, Value: pos})
+	return nil
+}
+func (bc *BitCask) set(record *Record) error {
+	bc.lock.Lock()
+	pos, err := bc.walWriter.Write(record)
+	if err != nil {
+		bc.lock.Unlock()
+		return err
+	}
+	if record.RType == RecordUpdate || record.RType == RecordBatchUpdated {
+		bc.memtable.Set(&RecordPos{Key: record.Key, Value: pos})
+	}
+	if record.RType == RecordDelete || record.RType == RecordBatchDeleted {
+		bc.memtable.Delete(record.Key)
+	}
+	bc.lock.Unlock()
+
+	bc.tryToFreshMemTable()
 	return nil
 }
 func (bc *BitCask) Delete(key []byte) error {
-	bc.tryToFreshMemTable()
-
-	bc.lock.Lock()
-	defer bc.lock.Unlock()
 	record := &Record{
 		Key:   key,
 		RType: RecordDelete,
 	}
-	if _, err := bc.walWriter.Write(record); err != nil {
+	if err := bc.set(record); err != nil {
 		return err
 	}
-	bc.memtable.Delete(key)
 	return nil
 }
+
 func (bc *BitCask) Query(key []byte) ([]byte, error) {
 	bc.lock.RLock()
 	defer bc.lock.RUnlock()
@@ -170,6 +180,9 @@ func (bc *BitCask) LoadWal() error {
 	sort.Slice(ls, func(i, j int) bool {
 		return ls[i] < ls[j]
 	})
+
+	txMap := make(map[uint32][]*txInfo)
+	var txSeq uint32
 	for i, f := range ls {
 		fileName := path.Join(bc.opts.dirPath, f)
 		if i == len(ls)-1 {
@@ -180,22 +193,26 @@ func (bc *BitCask) LoadWal() error {
 				return err
 			}
 			bc.walWriter = walWriter
-			offset, err := walWriter.RestoreAll(bc.memtable)
+			seq, offset, err := walWriter.RestoreAll(bc.memtable, txMap)
 			if err != nil {
 				return err
 			}
 			bc.walWriter.offset = offset
-			fmt.Println("offset", offset, bc.walWriter.offset)
+			txSeq = max(txSeq, seq)
+			//fmt.Println("offset", offset, bc.walWriter.offset)
 		} else {
 			walReader, err := NewWalReader(fileName)
 			if err != nil {
 				return err
 			}
-			if _, err := walReader.RestoreAll(bc.memtable); err != nil {
+			seq, _, err := walReader.RestoreAll(bc.memtable, txMap)
+			if err != nil {
 				return err
 			}
 			bc.walReader[fileName] = walReader
+			txSeq = max(txSeq, seq)
 		}
 	}
+	bc.batchSeq.Store(txSeq)
 	return nil
 }

@@ -13,7 +13,10 @@ const (
 	WalSuffix = ".wal"
 )
 
-var ErrorNotExist = errors.New("key not exist")
+var (
+	ErrorNotExist    = errors.New("key not exist")
+	ErrorBatchExceed = errors.New("batch max number exceeded")
+)
 
 func getWalFileIndex(walFile string) int {
 	rawIndex := strings.Replace(walFile, WalSuffix, "", -1)
@@ -30,6 +33,7 @@ type Options struct {
 	maxLevel    int    //最大等级
 	maxLevelNum int    //每一层最多sst数量
 	tableNum    int    // 一个sst 里面有block的个数
+	batchMaxNum uint32
 }
 
 type Option func(*Options)
@@ -69,6 +73,9 @@ func (o *Options) defaultOptions() {
 	}
 	if o.maxWalSize <= 0 {
 		o.maxWalSize = 1024
+	}
+	if o.batchMaxNum <= 0 {
+		o.batchMaxNum = 1024
 	}
 }
 func NewOptions(dirPath string, opts ...Option) (*Options, error) {
