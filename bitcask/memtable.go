@@ -71,22 +71,6 @@ func (t *MemTable) Len() int {
 	return t.size
 }
 
-// 将数据装为bytes
-// func (t *MemTable) Bytes() []byte {
-// 	t.mu.RLock()
-// 	defer t.mu.RUnlock()
-
-// 	buf := bytes.NewBuffer(nil)
-// 	t.data.Ascend(func(item btree.Item) bool {
-// 		v := item.(*RecordPos)
-// 		n, body := v.Bytes()
-// 		binary.Write(buf, binary.LittleEndian, uint32(n))
-// 		buf.Write(body)
-// 		return true
-// 	})
-// 	return buf.Bytes()
-// }
-
 // 得到所有的RecordPoss
 func (t *MemTable) GetRecordPoss() []*RecordPos {
 	t.mu.RLock()
@@ -99,37 +83,6 @@ func (t *MemTable) GetRecordPoss() []*RecordPos {
 		return true
 	})
 	return RecordPoss
-}
-
-// 不需要添加锁的 set部分已经添加了
-// func (t *MemTable) Restore(data []byte) error {
-// 	buf := bytes.NewBuffer(data)
-// 	var n uint32
-// 	for {
-// 		if err := binary.Read(buf, binary.LittleEndian, &n); err != nil {
-// 			if err == io.EOF {
-// 				break
-// 			}
-// 			return err
-// 		}
-// 		cmd := new(RecordPos)
-// 		cmd.Restore(buf.Next(int(n)))
-// 		t.Set(cmd)
-// 	}
-// 	return nil
-// }
-
-// 得到第一个key
-func (t *MemTable) First() []byte {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
-	var firstKey []byte
-	t.data.Ascend(func(item btree.Item) bool {
-		firstKey = item.(*RecordPos).Key
-		return false
-	})
-	return firstKey
 }
 
 // 测试使用
@@ -153,19 +106,4 @@ func (t *MemTable) Fold(f func(key []byte, value *Pos) error) error {
 		return true
 	})
 	return nil
-}
-
-// 数据合并
-func (t *MemTable) Merge(other *MemTable) {
-	if other == nil {
-		return
-	}
-	other.mu.RLock()
-	defer other.mu.RUnlock()
-
-	other.data.Ascend(func(item btree.Item) bool {
-		RecordPos := item.(*RecordPos)
-		t.Set(RecordPos)
-		return true
-	})
 }

@@ -41,43 +41,69 @@ const (
 )
 
 // Bytes 将数据转为 bytes进行存储
-func (r *Record) Bytes() (int, []byte) {
+func (r *Record) Bytes() (int, []byte, error) {
 	buf := bytes.NewBuffer(nil)
-	binary.Write(buf, binary.LittleEndian, r.RType)
+
+	if err := binary.Write(buf, binary.LittleEndian, r.RType); err != nil {
+		return 0, nil, err
+	}
 	if r.RType == RecordBatchFinished || r.RType == RecordBatchDeleted || r.RType == RecordBatchUpdated {
-		binary.Write(buf, binary.LittleEndian, r.TxSeq)
+		if err := binary.Write(buf, binary.LittleEndian, r.TxSeq); err != nil {
+			return 0, nil, err
+		}
 	}
 	if r.RType == RecordBatchFinished {
-		return buf.Len(), buf.Bytes()
+		return buf.Len(), buf.Bytes(), nil
 	}
-	binary.Write(buf, binary.LittleEndian, uint32(len(r.Key)))
-	buf.Write([]byte(r.Key))
+
+	if err := binary.Write(buf, binary.LittleEndian, uint32(len(r.Key))); err != nil {
+		return 0, nil, err
+	}
+	if _, err := buf.Write(r.Key); err != nil {
+		return 0, nil, err
+	}
 	if r.RType == RecordUpdate || r.RType == RecordBatchUpdated {
-		binary.Write(buf, binary.LittleEndian, uint32(len(r.Value)))
-		buf.Write([]byte(r.Value))
+		if err := binary.Write(buf, binary.LittleEndian, uint32(len(r.Value))); err != nil {
+			return 0, nil, err
+		}
+		if _, err := buf.Write([]byte(r.Value)); err != nil {
+			return 0, nil, err
+		}
 	}
-	return buf.Len(), buf.Bytes()
+	return buf.Len(), buf.Bytes(), nil
 }
 
 // Restore 将数据进行恢复处理
-func (r *Record) Restore(data []byte) {
+func (r *Record) Restore(data []byte) error {
 	var n uint32
 	buf := bytes.NewBuffer(data)
-	binary.Read(buf, binary.LittleEndian, &r.RType)
+
+	if err := binary.Read(buf, binary.LittleEndian, &r.RType); err != nil {
+		return err
+	}
 	if r.RType == RecordBatchFinished || r.RType == RecordBatchDeleted || r.RType == RecordBatchUpdated {
-		binary.Read(buf, binary.LittleEndian, &r.TxSeq)
+		if err := binary.Read(buf, binary.LittleEndian, &r.TxSeq); err != nil {
+			return err
+		}
 	}
 	if r.RType == RecordBatchFinished {
 
 	} else {
-		binary.Read(buf, binary.LittleEndian, &n)
+
+		if err := binary.Read(buf, binary.LittleEndian, &n); err != nil {
+			return err
+		}
 		r.Key = []byte(string(buf.Next(int(n))))
 		if r.RType == RecordUpdate || r.RType == RecordBatchUpdated {
-			binary.Read(buf, binary.LittleEndian, &n)
+
+			if err := binary.Read(buf, binary.LittleEndian, &n); err != nil {
+				return err
+			}
 			r.Value = []byte(string(buf.Next(int(n))))
 		}
 		buf = nil
 	}
+	return nil
 
 }
 func (w *WalWriter) RestoreAll(mem *MemTable, txMap map[uint32][]*txInfo) (uint32, uint32, error) {
@@ -190,7 +216,7 @@ func restoreAll(buf io.Reader, mem *MemTable, fileName string, txMap map[uint32]
 					})
 				}
 			} else {
-				if rType == RecordUpdate {
+				if rType == RecordDelete {
 					mem.Delete(record.Key)
 				} else {
 					txMap[rTxSeq] = append(txMap[rTxSeq], &txInfo{

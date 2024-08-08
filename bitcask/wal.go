@@ -29,7 +29,10 @@ func NewWalWriter(fileName string) (*WalWriter, error) {
 	}, nil
 }
 func (w *WalWriter) Write(record *Record) (*Pos, error) {
-	n, body := record.Bytes()
+	n, body, err := record.Bytes()
+	if err != nil {
+		return nil, err
+	}
 	length, err := w.dest.Write(body)
 	if err != nil {
 		return nil, err
@@ -76,7 +79,10 @@ func restore(r io.ReaderAt, offset, length uint32) (*Record, error) {
 		return nil, err
 	}
 	record := &Record{}
-	record.Restore(buf)
+
+	if err := record.Restore(buf); err != nil {
+		return nil, err
+	}
 	return record, nil
 }
 func (w *WalWriter) Restore(offset, length uint32) (*Record, error) {
