@@ -1,7 +1,7 @@
 package bitcask
 
 import (
-	"bitcask/util"
+	"github.com/xia-Sang/bitcask_go/util"
 	"testing"
 
 	"github.com/stretchr/testify/assert"

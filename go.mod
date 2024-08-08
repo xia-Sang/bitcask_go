@@ -1,4 +1,4 @@
-module bitcask
+module github.com/xia-Sang/bitcask_go
 
 go 1.22.5
 

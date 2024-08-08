@@ -1,9 +1,9 @@
 package bitcask
 
 import (
-	util "bitcask/util"
 	"errors"
 	"fmt"
+	util "github.com/xia-Sang/bitcask_go/util"
 	"path"
 	"strconv"
 	"strings"
