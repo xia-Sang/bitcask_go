@@ -1,17 +1,13 @@
 package lsm3
 
 import (
-	"bytes"
-	"encoding/gob"
 	"errors"
 	"fmt"
+	"github.com/xia-Sang/bitcask_go/bitcask"
+	"github.com/xia-Sang/bitcask_go/parse"
 	"reflect"
 	"sort"
 	"strings"
-	"unsafe"
-
-	"github.com/xia-Sang/bitcask_go/bitcask"
-	"github.com/xia-Sang/bitcask_go/parse"
 )
 
 type TableInfo struct {
@@ -31,66 +27,6 @@ func NewTableInfo(ast *parse.CreateTree) *TableInfo {
 		tableMapIndex:   make(map[uint32]struct{}),
 	}
 	return ti
-}
-
-func createStructType(columns []parse.ColumnDefinition) reflect.Type {
-	var structFields []reflect.StructField
-	for _, column := range columns {
-		structFields = append(structFields, reflect.StructField{
-			Name: strings.Title(column.Name),
-			Type: getFieldType(column.DataType),
-			Tag:  reflect.StructTag(fmt.Sprintf(`json:"%s"`, column.Name)),
-		})
-	}
-	// 创建结构体类型
-	structType := reflect.StructOf(structFields)
-	return structType
-}
-func (ti *TableInfo) newTableStruct() interface{} {
-	return reflect.New(ti.tableStructType).Interface()
-}
-func (ti *TableInfo) NewStructValues(values map[string]interface{}) interface{} {
-	return fillStructValues(ti.newTableStruct(), ti.tableColumns, values)
-}
-func fillStructValues(instance interface{}, columns []parse.ColumnDefinition, values map[string]interface{}) interface{} {
-	val := reflect.ValueOf(instance).Elem()
-
-	for i := 0; i < val.NumField(); i++ {
-		field := val.Field(i)
-		column := columns[i]
-		if field.CanSet() {
-			ptr := unsafe.Pointer(field.UnsafeAddr())
-			if value, ok := values[column.Name]; ok {
-				switch field.Kind() {
-				case reflect.String:
-					*(*string)(ptr) = value.(string)
-				case reflect.Int:
-					*(*int)(ptr) = value.(int)
-				case reflect.Float64:
-					*(*float64)(ptr) = value.(float64)
-				case reflect.Bool:
-					*(*bool)(ptr) = value.(bool)
-				default:
-					*(*string)(ptr) = value.(string)
-				}
-			} else {
-				switch field.Kind() {
-				case reflect.String:
-					*(*string)(ptr) = "nil"
-				case reflect.Float64:
-					*(*float64)(ptr) = 0.0
-				case reflect.Int:
-					*(*float64)(ptr) = 0
-				case reflect.Bool:
-					*(*bool)(ptr) = false
-				default:
-					*(*string)(ptr) = "nil"
-				}
-			}
-
-		}
-	}
-	return val.Interface()
 }
 
 type Contains struct {
@@ -148,7 +84,6 @@ func (c *Contains) InsertTable(sql string) error {
 	if !ok {
 		return errors.New("table not exist")
 	}
-	// 确保插入的字段名与表结构匹配
 	for _, tableInfo := range insertAst.Values {
 		dict := make(map[string]interface{})
 		for i, value := range tableInfo {
@@ -159,10 +94,8 @@ func (c *Contains) InsertTable(sql string) error {
 		if err != nil {
 			return err
 		}
-		key, value := tableid_row(c.ts[table.tableName], table.rowIndex), serializedValue
-		//fmt.Println("key, value", string(key), string(value))
-		err = c.db.Set(key, value)
-		if err != nil {
+		key, value := tableName(c.ts[table.tableName], table.rowIndex), serializedValue
+		if err = c.db.Set(key, value); err != nil {
 			return err
 		}
 		table.tableMapIndex[table.rowIndex] = struct{}{}
@@ -176,33 +109,11 @@ func (c *Contains) SelectTable(sql string) error {
 	if err != nil {
 		return err
 	}
-	// fmt.Println(selectAst)
-	table, ok := c.table[selectAst.Table]
-	if !ok {
-		return errors.New("table not exist")
+	values, _, err := c.getTableInfosWithWhere(selectAst.Table, selectAst.Where)
+	if err != nil {
+		return err
 	}
 
-	var keys []uint32
-	for id := range table.tableMapIndex {
-		keys = append(keys, id)
-	}
-	sort.Slice(keys, func(i, j int) bool {
-		return keys[i] < keys[j]
-	})
-	var values []interface{}
-	for _, id := range keys {
-		key := tableid_row(c.ts[table.tableName], id)
-		encValue, err := c.db.Query(key)
-		if err != nil {
-			return err
-		}
-		value := table.newTableStruct() //*struct
-		if err := deserialize(encValue, value); err != nil {
-			return err
-		}
-		values = append(values, value)
-	}
-	// fmt.Println(selectAst.Projects)
 	if len(values) > 0 {
 		if selectAst.Projects[0] == "*" {
 			printTable(values)
@@ -215,42 +126,107 @@ func (c *Contains) SelectTable(sql string) error {
 
 	return nil
 }
-
-// getFieldType 将列的数据类型映射为Go的数据类型
-func getFieldType(columnType string) reflect.Type {
-	switch columnType {
-	case "int":
-		return reflect.TypeOf(int(0))
-	case "string":
-		return reflect.TypeOf("")
-	case "bool":
-		return reflect.TypeOf(false)
-	case "float64":
-		return reflect.TypeOf(0.0)
-	default:
-		return reflect.TypeOf("")
-	}
-}
-
-// serialize 将interface{}类型的数据序列化为字节数组
-func serialize(data interface{}) ([]byte, error) {
-	var buf bytes.Buffer
-	enc := gob.NewEncoder(&buf)
-	err := enc.Encode(data)
+func (c *Contains) DeleteTable(sql string) error {
+	scan := parse.NewScannerFromString(sql)
+	deleteAst, err := scan.ParseDelete()
 	if err != nil {
-		return nil, err
+		return err
 	}
-	return buf.Bytes(), nil
+
+	values, ids, err := c.getTableInfosWithWhere(deleteAst.Table, deleteAst.Where)
+	if err != nil {
+		return err
+	}
+	//fmt.Println(ids)
+
+	for _, id := range ids {
+		key := tableName(c.ts[deleteAst.Table], id)
+		if err := c.db.Delete(key); err != nil {
+			return err
+		}
+		delete(c.table[deleteAst.Table].tableMapIndex, id)
+	}
+	fmt.Println("Delete Table")
+	fmt.Println(values)
+
+	return nil
 }
 
-// deserialize 将字节数组反序列化为interface{}类型的数据
-func deserialize(data []byte, v interface{}) error {
-	buf := bytes.NewBuffer(data)
-	dec := gob.NewDecoder(buf)
-	return dec.Decode(v)
-}
-
-// tableid_row 生成一个唯一的行标识符
-func tableid_row(tableIndex, rowIndex uint32) []byte {
+// tabled_row 生成一个唯一的行标识符
+func tableName(tableIndex, rowIndex uint32) []byte {
 	return []byte(fmt.Sprintf("%03d_%04d", tableIndex, rowIndex))
+}
+
+// 根据where信息来实现对于数据的检索
+func (c *Contains) getTableInfosWithWhere(table string, where []string) ([]interface{}, []uint32, error) {
+	tableInfo, ok := c.table[table]
+	if !ok {
+		return nil, nil, errors.New("table not exist")
+	}
+	var keys []uint32
+	for id := range tableInfo.tableMapIndex {
+		keys = append(keys, id)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		return keys[i] < keys[j]
+	})
+
+	var values []interface{}
+	var ids []uint32
+
+	if len(where) == 0 {
+		for _, id := range keys {
+			key := tableName(c.ts[tableInfo.tableName], id)
+			encValue, err := c.db.Query(key)
+			if err != nil {
+				return nil, nil, err
+			}
+			value := tableInfo.newTableStruct()
+			if err := deserialize(encValue, value); err != nil {
+				return nil, nil, err
+			}
+			values = append(values, value)
+			ids = append(ids, id)
+		}
+		return values, ids, nil
+	}
+
+	if len(where) != 3 {
+		return nil, nil, errors.New("invalid where condition")
+	}
+
+	column := where[0]
+	op := where[1]
+	rightValueStr := where[2]
+
+	field, ok := tableInfo.tableStructType.FieldByName(strings.Title(column))
+	if !ok {
+		return nil, nil, errors.New("field not exist")
+	}
+	fieldType := field.Type
+
+	rightValue, err := convertToType(rightValueStr, fieldType)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	for _, id := range keys {
+		key := tableName(c.ts[tableInfo.tableName], id)
+		encValue, err := c.db.Query(key)
+		if err != nil {
+			return nil, nil, err
+		}
+		value := tableInfo.newTableStruct()
+		if err := deserialize(encValue, value); err != nil {
+			return nil, nil, err
+		}
+		structValue := reflect.ValueOf(value).Elem()
+		leftValue := structValue.FieldByName(strings.Title(column))
+
+		if ok := evaluateCondition(op, leftValue, rightValue); ok {
+			values = append(values, value)
+			ids = append(ids, id)
+		}
+	}
+	return values, ids, nil
 }

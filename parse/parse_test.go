@@ -37,6 +37,7 @@ func TestParse4(t *testing.T) {
 	t.Log(ast)
 	t.Log(err)
 }
+
 func TestParse2(t *testing.T) {
 	// sql := `CREATE TABLE mytable (id INT PRIMARY KEY, name VARCHAR)`
 	// sql := `CREATE TABLE mytable (id INT(11) PRIMARY KEY,age VARCHAR,name VARCHAR 255,balance DECIMAL)`

@@ -1,4 +1,5 @@
 # bitcask_go 数据库
+![alt text](./asserts/image.png)
 
 bitcask_go 是一个基于 Bitcask 存储引擎的简单数据库系统，使用 Go 语言实现。这个项目在完全实现的 Bitcask 基础上，添加了基本的 SQL 解析功能。
 

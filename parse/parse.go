@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// sql解析类型
+// SqlType sql解析类型
 type SqlType string
 
 const (
@@ -147,7 +147,7 @@ type InsertTree struct {
 	Values  [][]string //value1, value2, ...：需要插入的字段值
 }
 
-// https://www.runoob.com/sql/sql-insert.html
+// ParseInsert https://www.runoob.com/sql/sql-insert.html
 /*
 	INSERT INTO table_name
 	VALUES (value1,value2,value3,...);
@@ -356,7 +356,10 @@ type DeleteTree struct {
 
 func (s *Scanner) ParseDelete() (ast *DeleteTree, err error) {
 	ast = &DeleteTree{}
-	// 不需要进行 解析 insert
+	if s.next(); s.end || strings.ToUpper(string(s.curr)) != string(DELETE) {
+		err = fmt.Errorf("%s is not DELETE statement,error token: %s", s.buffer, s.curr)
+		return
+	}
 	// 解析 into
 	if s.next(); s.end || strings.ToUpper(string(s.curr)) != FROM {
 		err = fmt.Errorf("%s is not DElETE statement,error token: %s", s.buffer, s.curr)
