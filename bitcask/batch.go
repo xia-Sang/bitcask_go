@@ -1,20 +1,26 @@
 package bitcask
 
+// Batch 表示一个批处理操作
 type Batch struct {
-	db       *BitCask
-	opts     *Options
-	batchSeq uint32
-	pending  map[string]*Record
+	db       *BitCask           // 数据库实例
+	opts     *Options           // 选项配置
+	batchSeq uint32             // 批处理序列号
+	pending  map[string]*Record // 待处理的记录
 }
 
+// NewBatch 创建并返回一个新的 Batch 实例
 func NewBatch(db *BitCask, opts *Options) *Batch {
 	return &Batch{db: db, opts: opts, pending: make(map[string]*Record), batchSeq: db.batchSeq.Load()}
 }
+
+// Set 在批处理中添加或更新一个键值对
 func (b *Batch) Set(key []byte, value []byte) error {
 	record := &Record{Key: key, Value: value, TxSeq: b.batchSeq, RType: RecordBatchUpdated}
 	b.pending[string(key)] = record
 	return nil
 }
+
+// Delete 从批处理中删除一个键值对
 func (b *Batch) Delete(key []byte) error {
 	if _, ok := b.pending[string(key)]; ok {
 		delete(b.pending, string(key))
@@ -24,6 +30,8 @@ func (b *Batch) Delete(key []byte) error {
 	}
 	return nil
 }
+
+// Commit 提交批处理中的所有操作
 func (b *Batch) Commit() error {
 	if len(b.pending) == 0 {
 		return nil

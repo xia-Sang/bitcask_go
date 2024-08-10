@@ -14,7 +14,6 @@ type RecordPos struct {
 }
 
 func (r *RecordPos) Less(than btree.Item) bool {
-	// return r.Key < than.(*RecordPos).Key
 	return bytes.Compare(r.Key, than.(*RecordPos).Key) < 0
 }
 

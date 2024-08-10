@@ -1,6 +1,7 @@
 package bitcask
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/xia-Sang/bitcask_go/util"
@@ -116,6 +117,10 @@ func TestMemTable_Set6(t *testing.T) {
 		}
 		//t.Logf("(%s:%s)", key, val)
 	}
+	db.Fold(func(key, value []byte) bool {
+		fmt.Printf("(%s:%s)\n", key, value)
+		return true
+	})
 }
 func TestMemTable_Get0(t *testing.T) {
 	opts, err := NewOptions("./data")
@@ -135,7 +140,6 @@ func TestMemTable_Get0(t *testing.T) {
 			assert.NotNil(t, err)
 			assert.Equal(t, err, ErrorNotExist)
 		}
-		//t.Logf("(%s:%s:%v)", key, val, err)
 	}
 }
 func TestMemTable_Get(t *testing.T) {
@@ -157,7 +161,6 @@ func TestMemTable_Get(t *testing.T) {
 		}
 		t.Logf("(%s:%s)", key, val)
 	}
-	//db.memtable.Show()
 	err = db.memtable.Fold(func(key []byte, value *Pos) error {
 		t.Logf("(%s:%v)\n", key, value)
 		return nil
@@ -171,7 +174,7 @@ func TestMemTable_Get1(t *testing.T) {
 	assert.Nil(t, err)
 	t.Log(db)
 	t.Log(db.walWriter.offset)
-	//db.memtable.Show()
+
 	err = db.Flush()
 	assert.Nil(t, err)
 }

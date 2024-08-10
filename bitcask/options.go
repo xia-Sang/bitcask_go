@@ -3,10 +3,11 @@ package bitcask
 import (
 	"errors"
 	"fmt"
-	util "github.com/xia-Sang/bitcask_go/util"
 	"path"
 	"strconv"
 	"strings"
+
+	util "github.com/xia-Sang/bitcask_go/util"
 )
 
 const (
@@ -72,7 +73,7 @@ func (o *Options) defaultOptions() {
 		o.maxLevel = 7
 	}
 	if o.maxWalSize <= 0 {
-		o.maxWalSize = 1024
+		o.maxWalSize = 1024 * 1024
 	}
 	if o.batchMaxNum <= 0 {
 		o.batchMaxNum = 1024

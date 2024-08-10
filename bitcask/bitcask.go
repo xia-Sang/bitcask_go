@@ -1,6 +1,7 @@
 package bitcask
 
 import (
+	"fmt"
 	"math"
 	"os"
 	"path"
@@ -9,16 +10,18 @@ import (
 	"sync/atomic"
 )
 
+// BitCask 结构体表示一个 BitCask 数据库实例
 type BitCask struct {
-	opts          *Options
-	memtable      *MemTable
-	lock          sync.RWMutex
-	walReader     map[string]*WalReader
-	walWriter     *WalWriter
-	memTableIndex uint32
-	batchSeq      atomic.Uint32
+	opts          *Options              // 配置选项
+	memtable      *MemTable             // 内存表
+	lock          sync.RWMutex          // 读写锁
+	walReader     map[string]*WalReader // WAL 读取器
+	walWriter     *WalWriter            // WAL 写入器
+	memTableIndex uint32                // 内存表索引
+	batchSeq      atomic.Uint32         // 批处理序列号
 }
 
+// getMaxWalSize 获取最大 WAL 文件大小
 func (bc *BitCask) getMaxWalSize() uint32 {
 	pow := int(bc.memTableIndex) / bc.opts.tableNum
 	if pow > bc.opts.maxLevelNum {
@@ -26,14 +29,20 @@ func (bc *BitCask) getMaxWalSize() uint32 {
 	}
 	return bc.opts.maxWalSize * uint32(math.Pow10(pow))
 }
+
+// checkWalOverFlow 检查 WAL 文件是否溢出
 func (bc *BitCask) checkWalOverFlow() bool {
 	return bc.walWriter.Size() >= bc.getMaxWalSize()
 }
+
+// tryToFreshMemTable 尝试刷新内存表
 func (bc *BitCask) tryToFreshMemTable() {
 	if bc.checkWalOverFlow() {
 		bc.newWalFile()
 	}
 }
+
+// NewBitCask 创建并返回一个新的 BitCask 实例
 func NewBitCask(opts *Options) (*BitCask, error) {
 	bc := &BitCask{
 		opts:          opts,
@@ -47,8 +56,9 @@ func NewBitCask(opts *Options) (*BitCask, error) {
 	}
 	return bc, nil
 }
-func (bc *BitCask) Set(key, value []byte) error {
 
+// Set 在数据库中添加或更新一个键值对
+func (bc *BitCask) Set(key, value []byte) error {
 	record := &Record{
 		Key:   key,
 		Value: value,
@@ -59,6 +69,8 @@ func (bc *BitCask) Set(key, value []byte) error {
 	}
 	return nil
 }
+
+// set 写入记录到 WAL 文件并更新内存表
 func (bc *BitCask) set(record *Record) error {
 	bc.lock.Lock()
 	pos, err := bc.walWriter.Write(record)
@@ -77,6 +89,8 @@ func (bc *BitCask) set(record *Record) error {
 	bc.tryToFreshMemTable()
 	return nil
 }
+
+// Delete 从数据库中删除一个键值对
 func (bc *BitCask) Delete(key []byte) error {
 	record := &Record{
 		Key:   key,
@@ -88,6 +102,7 @@ func (bc *BitCask) Delete(key []byte) error {
 	return nil
 }
 
+// Query 检索与给定键关联的值
 func (bc *BitCask) Query(key []byte) ([]byte, error) {
 	bc.lock.RLock()
 	defer bc.lock.RUnlock()
@@ -114,22 +129,22 @@ func (bc *BitCask) Query(key []byte) ([]byte, error) {
 		return nil, ErrorNotExist
 	}
 }
+
+// Flush 刷新内存表到新的 WAL 文件
 func (bc *BitCask) Flush() error {
 	bc.newWalFile()
 
 	var ls []string
-	for k, _ := range bc.walReader {
-		ls = append(ls, k)
+	for _, w := range bc.walReader {
+		ls = append(ls, w.fileName)
 	}
 
 	if err := bc.memtable.Fold(func(key []byte, pos *Pos) error {
 		if v, ok := bc.walReader[pos.fileName]; ok {
-
 			record, err := v.Restore(pos.offset, pos.length)
 			if err != nil {
 				return err
 			}
-			//fmt.Printf("(%s:%s)\n", key, record.Value)
 			if err := bc.Set(key, record.Value); err != nil {
 				return err
 			}
@@ -145,6 +160,8 @@ func (bc *BitCask) Flush() error {
 	}
 	return nil
 }
+
+// newWalFile 创建一个新的 WAL 文件
 func (bc *BitCask) newWalFile() {
 	bc.lock.Lock()
 	defer bc.lock.Unlock()
@@ -155,6 +172,8 @@ func (bc *BitCask) newWalFile() {
 	bc.memTableIndex++
 	bc.walWriter, _ = NewWalWriter(walFile(bc.opts.dirPath, bc.memTableIndex))
 }
+
+// LoadWal 加载 WAL 文件
 func (bc *BitCask) LoadWal() error {
 	bc.lock.RLock()
 	defer bc.lock.RUnlock()
@@ -199,7 +218,6 @@ func (bc *BitCask) LoadWal() error {
 			}
 			bc.walWriter.offset = offset
 			txSeq = max(txSeq, seq)
-			//fmt.Println("offset", offset, bc.walWriter.offset)
 		} else {
 			walReader, err := NewWalReader(fileName)
 			if err != nil {
@@ -214,5 +232,54 @@ func (bc *BitCask) LoadWal() error {
 		}
 	}
 	bc.batchSeq.Store(txSeq)
+	return nil
+}
+func (bc *BitCask) Fold(fn func(key, value []byte) bool) error {
+	bc.lock.Lock()
+	defer bc.lock.Unlock()
+
+	if err := bc.memtable.Fold(func(key []byte, pos *Pos) error {
+		if v, ok := bc.walReader[pos.fileName]; ok {
+			record, err := v.Restore(pos.offset, pos.length)
+			if err != nil {
+				return err
+			}
+			if !fn(record.Key, record.Value) {
+				return nil
+			}
+			return nil
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	return nil
+}
+func (bc *BitCask) Show() error {
+	bc.lock.RLock()
+	defer bc.lock.RUnlock()
+
+	if err := bc.memtable.Fold(func(key []byte, pos *Pos) error {
+		if v, ok := bc.walReader[pos.fileName]; ok {
+			record, err := v.Restore(pos.offset, pos.length)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("(%s:%s)\n", key, record.Value)
+			return nil
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	return nil
+}
+func (bc *BitCask) ShowMemTable() error {
+	bc.lock.RLock()
+	defer bc.lock.RUnlock()
+	err := bc.Show()
+	if err != nil {
+		return err
+	}
 	return nil
 }
