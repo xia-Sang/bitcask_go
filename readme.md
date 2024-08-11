@@ -38,7 +38,6 @@ bitcask_go 是一个基于 Bitcask 存储引擎的简单数据库系统，使用
 ![alt text](./asserts/image-3.png)
 
 5. 使用 DELETE 语句删除数据
-
 ![alt text](./asserts/image-4.png)
 6. 只有执行.exit之后数据才会进行保存！！！
 ## 局限性
