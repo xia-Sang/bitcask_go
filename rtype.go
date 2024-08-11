@@ -66,10 +66,10 @@ func createStructType(columns []parse.ColumnDefinition) reflect.Type {
 	return structType
 }
 func (ti *TableInfo) newTableStruct() interface{} {
-	return reflect.New(ti.tableStructType).Interface()
+	return reflect.New(ti.TableStructType).Interface()
 }
 func (ti *TableInfo) NewStructValues(values map[string]interface{}) interface{} {
-	return fillStructValues(ti.newTableStruct(), ti.tableColumns, values)
+	return fillStructValues(ti.newTableStruct(), ti.TableColumns, values)
 }
 func fillStructValues(instance interface{}, columns []parse.ColumnDefinition, values map[string]interface{}) interface{} {
 	val := reflect.ValueOf(instance).Elem()

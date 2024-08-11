@@ -13,6 +13,17 @@ func TestDb(t *testing.T) {
 	c, err := NewContains()
 	assert.Nil(t, err)
 	t.Log(c)
+	c.ShowTables()
+	c.ShowColumns("User")
+	c.ShowColumns("my_table")
+
+	selectSql1 := "SELECT * FROM User"
+	err = c.SelectTable(selectSql1)
+	assert.Nil(t, err)
+
+	selectSql2 := "SELECT * FROM my_table"
+	err = c.SelectTable(selectSql2)
+	assert.Nil(t, err)
 }
 func TestDb1(t *testing.T) {
 	c, err := NewContains()
@@ -58,6 +69,7 @@ func TestDb1(t *testing.T) {
 	selectSql2 := "SELECT (id, name, balance) FROM User where id = 1"
 	err = c.SelectTable(selectSql2)
 	assert.Nil(t, err)
+	c.Close()
 }
 func TestDb2(t *testing.T) {
 	c, err := NewContains()
@@ -130,12 +142,7 @@ func TestDb3(t *testing.T) {
 	c, err := NewContains()
 	assert.Nil(t, err)
 
-	sql1 := `CREATE TABLE User (
-		id INT(11),
-		name VARCHAR(255),
-		balance DECIMAL(10,2),
-		birthdate DATE(2024/8/8)
-	)`
+	sql1 := `CREATE TABLE User (id INT(11),name VARCHAR(255),balance DECIMAL(10,2),birthdate DATE(2024/8/8))`
 	err = c.CreatTable(sql1)
 	assert.Nil(t, err)
 	for i := range 5 {

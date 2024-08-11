@@ -27,16 +27,15 @@ func (c *Contains) ShowColumns(table string) {
 	fmt.Printf("| Column Name     | Data Type       |\n")
 	fmt.Printf("+-----------------+-----------------+\n")
 
-	for _, column := range v.tableColumns {
+	for _, column := range v.TableColumns {
 		fmt.Printf("| %-15s | %-15s |\n", column.Name, column.DataType)
 	}
 
 	fmt.Printf("+-----------------+-----------------+\n")
 }
 
-// fmt.Printf("Table %s not found\n", tableName)
-
 func (c *Contains) Show() {
+	c.show()
 }
 func (c *Contains) show() {
 	for k, v := range c.table {

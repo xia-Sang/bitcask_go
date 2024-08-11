@@ -23,13 +23,18 @@ bitcask_go 是一个基于 Bitcask 存储引擎的简单数据库系统，使用
 ## 使用方法
 
 请参考 `db_test.go` 文件中的示例代码来了解如何使用 bitcask_go 数据库。基本使用流程如下：
-
+### 调用./cmd/cmd.go
 1. 创建数据库实例
 2. 执行 CREATE TABLE 语句创建表
+![alt text](./asserts/image-0.png)
 3. 使用 INSERT 语句插入数据
+![alt text](./asserts/image-1.png)
 4. 通过 SELECT 语句查询数据
+![alt text](./asserts/image-2.png)
+![alt text](./asserts/image-3.png)
 5. 使用 DELETE 语句删除数据
-
+![alt text](./asserts/image-4.png)
+6. 只有执行.exit之后数据才会进行保存！！！
 ## 局限性
 
 - SQL 解析功能仍在开发中，目前支持的操作有限

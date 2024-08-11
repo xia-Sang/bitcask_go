@@ -1,30 +1,88 @@
 package lsm3
 
 import (
+	"bytes"
+	"encoding/gob"
 	"errors"
 	"fmt"
-	"github.com/xia-Sang/bitcask_go/bitcask"
-	"github.com/xia-Sang/bitcask_go/parse"
 	"reflect"
 	"sort"
 	"strings"
+
+	"github.com/xia-Sang/bitcask_go/bitcask"
+	"github.com/xia-Sang/bitcask_go/parse"
 )
 
 type TableInfo struct {
-	rowIndex        uint32
-	tableName       string
-	tableColumns    []parse.ColumnDefinition
-	tableStructType reflect.Type
-	tableMapIndex   map[uint32]struct{}
+	RowIndex        uint32
+	TableName       string
+	TableColumns    []parse.ColumnDefinition
+	TableStructType reflect.Type
+	TableMapIndex   map[uint32]struct{}
+}
+
+func (ti *TableInfo) Bytes() (int, []byte, error) {
+	var buf bytes.Buffer
+	enc := gob.NewEncoder(&buf)
+
+	// 创建临时结构体，不包括 TableStructType
+	temp := struct {
+		RowIndex      uint32
+		TableName     string
+		TableColumns  []parse.ColumnDefinition
+		TableMapIndex map[uint32]struct{}
+	}{
+		RowIndex:      ti.RowIndex,
+		TableName:     ti.TableName,
+		TableColumns:  ti.TableColumns,
+		TableMapIndex: ti.TableMapIndex,
+	}
+
+	// 序列化临时结构体
+	err := enc.Encode(temp)
+	if err != nil {
+		return 0, nil, fmt.Errorf("failed to encode TableInfo: %w", err)
+	}
+
+	return buf.Len(), buf.Bytes(), nil
+}
+
+func (ti *TableInfo) FromBytes(data []byte) error {
+	buf := bytes.NewBuffer(data)
+	dec := gob.NewDecoder(buf)
+
+	// 临时结构体用来反序列化，不包括 TableStructType
+	temp := struct {
+		RowIndex      uint32
+		TableName     string
+		TableColumns  []parse.ColumnDefinition
+		TableMapIndex map[uint32]struct{}
+	}{}
+
+	// 反序列化临时结构体
+	err := dec.Decode(&temp)
+	if err != nil {
+		return fmt.Errorf("failed to decode TableInfo: %w", err)
+	}
+
+	// 还原字段
+	ti.RowIndex = temp.RowIndex
+	ti.TableName = temp.TableName
+	ti.TableColumns = temp.TableColumns
+	ti.TableMapIndex = temp.TableMapIndex
+
+	// TableStructType 不需要处理
+	ti.TableStructType = createStructType(ti.TableColumns)
+	return nil
 }
 
 func NewTableInfo(ast *parse.CreateTree) *TableInfo {
 	ti := &TableInfo{
-		rowIndex:        0,
-		tableName:       ast.Table,
-		tableColumns:    ast.Columns,
-		tableStructType: createStructType(ast.Columns),
-		tableMapIndex:   make(map[uint32]struct{}),
+		RowIndex:        0,
+		TableName:       ast.Table,
+		TableColumns:    ast.Columns,
+		TableStructType: createStructType(ast.Columns),
+		TableMapIndex:   make(map[uint32]struct{}),
 	}
 	return ti
 }
@@ -35,19 +93,64 @@ type Contains struct {
 	tableIndex uint32
 	row        uint32
 	db         *bitcask.BitCask
+	dirPath    string
 }
 
-// NewContains 创建表之后 我们需要对于table 进行存储
+// Bytes compresses the Contains into a byte slice
+func (c *Contains) Bytes() (int, []byte, error) {
+	var buf bytes.Buffer
+	enc := gob.NewEncoder(&buf)
+	err := enc.Encode(c.ts)
+	if err != nil {
+		return 0, nil, err
+	}
+	err = enc.Encode(c.tableIndex)
+	if err != nil {
+		return 0, nil, err
+	}
+	err = enc.Encode(c.row)
+	if err != nil {
+		return 0, nil, err
+	}
+	return buf.Len(), buf.Bytes(), nil
+}
+
+// RestoreContains Restore decompresses the byte slice into a Contains
+func RestoreContains(data []byte) (*Contains, error) {
+	buf := bytes.NewReader(data)
+	dec := gob.NewDecoder(buf)
+	var ts map[string]uint32
+	var tableIndex uint32
+	var row uint32
+	err := dec.Decode(&ts)
+	if err != nil {
+		return nil, err
+	}
+	err = dec.Decode(&tableIndex)
+	if err != nil {
+		return nil, err
+	}
+	err = dec.Decode(&row)
+	if err != nil {
+		return nil, err
+	}
+	return &Contains{
+		ts:         ts,
+		tableIndex: tableIndex,
+		row:        row,
+	}, nil
+}
+
+// NewContainsWithDirPath 创建表之后 我们需要对于table 进行存储
 // 并且记录重要信息
 // table index，table ast
-func NewContains() (*Contains, error) {
-	c := &Contains{
-		table:      make(map[string]*TableInfo),
-		ts:         make(map[string]uint32),
-		tableIndex: 0,
-		row:        0,
+func NewContainsWithDirPath(dirPath string) (*Contains, error) {
+	c, err := LoadFromDB(dirPath)
+	c.dirPath = dirPath
+	if err != nil {
+		return nil, err
 	}
-	opts, err := bitcask.NewOptions("./data")
+	opts, err := bitcask.NewOptions(dirPath)
 	if err != nil {
 		return nil, err
 	}
@@ -57,6 +160,29 @@ func NewContains() (*Contains, error) {
 	}
 	c.db = db
 	return c, nil
+}
+
+// NewContains 测试使用
+func NewContains() (*Contains, error) {
+	dirPath := "./data"
+	c, err := LoadFromDB(dirPath)
+	c.dirPath = dirPath
+	if err != nil {
+		return nil, err
+	}
+	opts, err := bitcask.NewOptions(dirPath)
+	if err != nil {
+		return nil, err
+	}
+	db, err := bitcask.NewBitCask(opts)
+	if err != nil {
+		return nil, err
+	}
+	c.db = db
+	return c, nil
+}
+func (c *Contains) Close() error {
+	return c.SaveToDB()
 }
 func (c *Contains) CreatTable(sql string) error {
 	scan := parse.NewScannerFromString(sql)
@@ -94,12 +220,12 @@ func (c *Contains) InsertTable(sql string) error {
 		if err != nil {
 			return err
 		}
-		key, value := tableName(c.ts[table.tableName], table.rowIndex), serializedValue
+		key, value := tableName(c.ts[table.TableName], table.RowIndex), serializedValue
 		if err = c.db.Set(key, value); err != nil {
 			return err
 		}
-		table.tableMapIndex[table.rowIndex] = struct{}{}
-		table.rowIndex++
+		table.TableMapIndex[table.RowIndex] = struct{}{}
+		table.RowIndex++
 	}
 	return nil
 }
@@ -144,10 +270,10 @@ func (c *Contains) DeleteTable(sql string) error {
 		if err := c.db.Delete(key); err != nil {
 			return err
 		}
-		delete(c.table[deleteAst.Table].tableMapIndex, id)
+		delete(c.table[deleteAst.Table].TableMapIndex, id)
 	}
 	fmt.Println("Delete Table")
-	fmt.Println(values)
+	printTable(values)
 
 	return nil
 }
@@ -164,7 +290,7 @@ func (c *Contains) getTableInfosWithWhere(table string, where []string) ([]inter
 		return nil, nil, errors.New("table not exist")
 	}
 	var keys []uint32
-	for id := range tableInfo.tableMapIndex {
+	for id := range tableInfo.TableMapIndex {
 		keys = append(keys, id)
 	}
 	sort.Slice(keys, func(i, j int) bool {
@@ -176,7 +302,7 @@ func (c *Contains) getTableInfosWithWhere(table string, where []string) ([]inter
 
 	if len(where) == 0 {
 		for _, id := range keys {
-			key := tableName(c.ts[tableInfo.tableName], id)
+			key := tableName(c.ts[tableInfo.TableName], id)
 			encValue, err := c.db.Query(key)
 			if err != nil {
 				return nil, nil, err
@@ -199,7 +325,7 @@ func (c *Contains) getTableInfosWithWhere(table string, where []string) ([]inter
 	op := where[1]
 	rightValueStr := where[2]
 
-	field, ok := tableInfo.tableStructType.FieldByName(strings.Title(column))
+	field, ok := tableInfo.TableStructType.FieldByName(strings.Title(column))
 	if !ok {
 		return nil, nil, errors.New("field not exist")
 	}
@@ -211,7 +337,7 @@ func (c *Contains) getTableInfosWithWhere(table string, where []string) ([]inter
 	}
 
 	for _, id := range keys {
-		key := tableName(c.ts[tableInfo.tableName], id)
+		key := tableName(c.ts[tableInfo.TableName], id)
 		encValue, err := c.db.Query(key)
 		if err != nil {
 			return nil, nil, err
