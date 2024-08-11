@@ -1,7 +1,6 @@
 package bitcask
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -13,6 +12,9 @@ type WalWriter struct {
 	offset   uint32
 }
 
+func (w *WalWriter) Sync() error {
+	return w.dest.Sync()
+}
 func (w *WalWriter) Size() uint32 {
 	return w.offset
 }
@@ -38,7 +40,7 @@ func (w *WalWriter) Write(record *Record) (*Pos, error) {
 		return nil, err
 	}
 	if length != n {
-		return nil, errors.New(fmt.Sprintf("write length %d != %d", length, n))
+		return nil, fmt.Errorf("write length %d != %d", length, n)
 	}
 	pos := &Pos{
 		offset:   w.offset,
@@ -49,6 +51,7 @@ func (w *WalWriter) Write(record *Record) (*Pos, error) {
 	return pos, nil
 }
 func (w *WalWriter) Close() {
+	_ = w.dest.Sync() //添加sync操作 避免数据遗漏
 	_ = w.dest.Close()
 }
 

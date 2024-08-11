@@ -17,6 +17,8 @@ const (
 var (
 	ErrorNotExist    = errors.New("key not exist")
 	ErrorBatchExceed = errors.New("batch max number exceeded")
+	ErrorBatchSync   = errors.New("batch sync error")
+	ErrorSync        = errors.New("bitcask sync error")
 )
 
 func getWalFileIndex(walFile string) int {
@@ -34,7 +36,9 @@ type Options struct {
 	maxLevel    int    //最大等级
 	maxLevelNum int    //每一层最多sst数量
 	tableNum    int    // 一个sst 里面有block的个数
-	batchMaxNum uint32
+	alwaySync   bool
+	batchMaxNum uint32 //batch的最大数量
+	batchSync   bool
 }
 
 type Option func(*Options)
@@ -62,6 +66,16 @@ func WithTableNum(num int) Option {
 		o.tableNum = num
 	}
 }
+func WithSync(sync bool) Option {
+	return func(o *Options) {
+		o.alwaySync = sync
+	}
+}
+func WithBatchSync(sync bool) Option {
+	return func(o *Options) {
+		o.batchSync = sync
+	}
+}
 func (o *Options) defaultOptions() {
 	if o.maxLevelNum <= 0 {
 		o.maxLevelNum = 10
@@ -78,6 +92,7 @@ func (o *Options) defaultOptions() {
 	if o.batchMaxNum <= 0 {
 		o.batchMaxNum = 1024
 	}
+
 }
 func NewOptions(dirPath string, opts ...Option) (*Options, error) {
 	options := &Options{dirPath: dirPath}

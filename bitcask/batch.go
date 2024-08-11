@@ -51,6 +51,11 @@ func (b *Batch) Commit() error {
 	if err := b.db.set(finishRecord); err != nil {
 		return err
 	}
+	if b.opts.batchSync {
+		if err := b.db.walWriter.Sync(); err != nil {
+			return ErrorBatchSync
+		}
+	}
 	b.pending = make(map[string]*Record)
 	b.db.batchSeq.Add(1)
 	return nil

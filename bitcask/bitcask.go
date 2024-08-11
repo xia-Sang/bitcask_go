@@ -74,6 +74,11 @@ func (bc *BitCask) Set(key, value []byte) error {
 func (bc *BitCask) set(record *Record) error {
 	bc.lock.Lock()
 	pos, err := bc.walWriter.Write(record)
+	if bc.opts.alwaySync {
+		if err := bc.walWriter.Sync(); err != nil {
+			return ErrorSync
+		}
+	}
 	if err != nil {
 		bc.lock.Unlock()
 		return err
