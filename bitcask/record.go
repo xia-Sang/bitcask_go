@@ -106,11 +106,11 @@ func (r *Record) Restore(data []byte) error {
 	return nil
 
 }
-func (w *WalWriter) RestoreAll(mem *MemTable, txMap map[uint32][]*txInfo) (uint32, uint32, error) {
-	return restoreAll(w.dest, mem, w.fileName, txMap)
+func (w *WalWriter) RestoreAll(mem *MemTable, txMap map[uint32][]*txInfo, stat *Stat) (uint32, uint32, error) {
+	return restoreAll(w.dest, mem, w.fileName, txMap, stat)
 }
-func (w *WalReader) RestoreAll(mem *MemTable, txMap map[uint32][]*txInfo) (uint32, uint32, error) {
-	return restoreAll(w.src, mem, w.fileName, txMap)
+func (w *WalReader) RestoreAll(mem *MemTable, txMap map[uint32][]*txInfo, stat *Stat) (uint32, uint32, error) {
+	return restoreAll(w.src, mem, w.fileName, txMap, stat)
 }
 
 type txInfo struct {
@@ -119,7 +119,7 @@ type txInfo struct {
 	pos   *Pos       //更新 只需要传入pos
 }
 
-func restoreAll(buf io.Reader, mem *MemTable, fileName string, txMap map[uint32][]*txInfo) (uint32, uint32, error) {
+func restoreAll(buf io.Reader, mem *MemTable, fileName string, txMap map[uint32][]*txInfo, stat *Stat) (uint32, uint32, error) {
 	var (
 		rType  RecordType
 		n      uint32
@@ -149,12 +149,19 @@ func restoreAll(buf io.Reader, mem *MemTable, fileName string, txMap map[uint32]
 		if rType == RecordBatchFinished {
 			for _, v := range txMap[rTxSeq] {
 				if v.rType == RecordBatchUpdated {
-					mem.Set(&RecordPos{
+					old := mem.Set(&RecordPos{
 						Key:   v.key,
 						Value: v.pos,
 					})
+					if old != nil {
+						stat.UselessSize += old.Value.length
+					}
 				} else {
-					mem.Delete(v.key)
+					old := mem.Delete(v.key)
+					if old != nil {
+						stat.UselessSize += old.Value.length
+					}
+					stat.UselessSize += v.pos.length
 				}
 			}
 			txSeq = max(int32(rTxSeq), txSeq)
@@ -204,10 +211,13 @@ func restoreAll(buf io.Reader, mem *MemTable, fileName string, txMap map[uint32]
 					length:   length,
 				}
 				if rType == RecordUpdate {
-					mem.Set(&RecordPos{
+					old := mem.Set(&RecordPos{
 						Key:   record.Key,
 						Value: pos,
 					})
+					if old != nil {
+						stat.UselessSize += old.Value.length
+					}
 				} else {
 					txMap[rTxSeq] = append(txMap[rTxSeq], &txInfo{
 						rType: RecordBatchUpdated,
@@ -217,7 +227,11 @@ func restoreAll(buf io.Reader, mem *MemTable, fileName string, txMap map[uint32]
 				}
 			} else {
 				if rType == RecordDelete {
-					mem.Delete(record.Key)
+					old := mem.Delete(record.Key)
+					if old != nil {
+						stat.UselessSize += old.Value.length
+					}
+					stat.UselessSize += length
 				} else {
 					txMap[rTxSeq] = append(txMap[rTxSeq], &txInfo{
 						rType: RecordBatchDeleted,

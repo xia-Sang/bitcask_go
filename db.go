@@ -182,7 +182,17 @@ func NewContains() (*Contains, error) {
 	return c, nil
 }
 func (c *Contains) Close() error {
-	return c.SaveToDB()
+	if err := c.SaveToDB(); err != nil {
+		return err
+	}
+	if err := c.db.Close(); err != nil {
+		return err
+	}
+	c.ts = nil
+	c.table = nil
+	c.tableIndex = 0
+	c.row = 0
+	return nil
 }
 func (c *Contains) CreatTable(sql string) error {
 	scan := parse.NewScannerFromString(sql)

@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/xia-Sang/bitcask_go/parse"
+	"github.com/xia-Sang/bitcask_go/util"
 )
 
 func TestDb(t *testing.T) {
@@ -70,6 +71,7 @@ func TestDb1(t *testing.T) {
 	err = c.SelectTable(selectSql2)
 	assert.Nil(t, err)
 	c.Close()
+	util.RemoveDir(c.dirPath)
 }
 func TestDb2(t *testing.T) {
 	c, err := NewContains()
@@ -100,6 +102,8 @@ func TestDb2(t *testing.T) {
 	selectSql3 := "SELECT (id1, name1, balance1,age) FROM User where id = 1"
 	err = c.SelectTable(selectSql3)
 	assert.Nil(t, err)
+	c.Close()
+	util.RemoveDir(c.dirPath)
 }
 func TestDb4(t *testing.T) {
 	c, err := NewContains()
@@ -137,6 +141,7 @@ func TestDb4(t *testing.T) {
 	selectSql4 := "SELECT * FROM User"
 	err = c.SelectTable(selectSql4)
 	assert.Nil(t, err)
+	util.RemoveDir(c.dirPath)
 }
 func TestDb3(t *testing.T) {
 	c, err := NewContains()
@@ -159,6 +164,7 @@ func TestDb3(t *testing.T) {
 	err = c.SelectTable(selectSql2)
 	assert.Nil(t, err)
 	c.ShowTables()
+	util.RemoveDir(c.dirPath)
 }
 func TestCreate(t *testing.T) {
 	columns := []parse.ColumnDefinition{

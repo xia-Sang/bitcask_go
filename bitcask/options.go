@@ -36,12 +36,19 @@ type Options struct {
 	maxLevel    int    //最大等级
 	maxLevelNum int    //每一层最多sst数量
 	tableNum    int    // 一个sst 里面有block的个数
-	alwaySync   bool
+	walSyncSize uint32 //wal文件同步个数
+	alwaySync   bool   //是否总是同步
 	batchMaxNum uint32 //batch的最大数量
-	batchSync   bool
+	batchSync   bool   //是否批量同步
 }
 
 type Option func(*Options)
+
+func WithWalSyncSize(size uint32) Option {
+	return func(o *Options) {
+		o.walSyncSize = size
+	}
+}
 
 func WithMaxSSTSize(size uint32) Option {
 	return func(o *Options) {
@@ -91,6 +98,9 @@ func (o *Options) defaultOptions() {
 	}
 	if o.batchMaxNum <= 0 {
 		o.batchMaxNum = 1024
+	}
+	if o.walSyncSize <= 0 {
+		o.walSyncSize = 3
 	}
 
 }

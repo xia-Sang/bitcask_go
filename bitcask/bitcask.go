@@ -19,6 +19,7 @@ type BitCask struct {
 	walWriter     *WalWriter            // WAL 写入器
 	memTableIndex uint32                // 内存表索引
 	batchSeq      atomic.Uint32         // 批处理序列号
+	stat          *Stat                 // 统计信息
 }
 
 // getMaxWalSize 获取最大 WAL 文件大小
@@ -42,19 +43,19 @@ func (bc *BitCask) tryToFreshMemTable() {
 	}
 }
 
-// NewBitCask 创建并返回一个新的 BitCask 实例
-func NewBitCask(opts *Options) (*BitCask, error) {
-	bc := &BitCask{
-		opts:          opts,
-		memtable:      NewMemTable(),
-		walReader:     make(map[string]*WalReader),
-		memTableIndex: 0,
+// Close 关闭 BitCask 实例
+func (bc *BitCask) Close() error {
+	if bc.checkFlushFlag() {
+		if err := bc.Flush(); err != nil {
+			return err
+		}
 	}
-
-	if err := bc.LoadWal(); err != nil {
-		return nil, err
-	}
-	return bc, nil
+	bc.walWriter.Close()
+	bc.memtable = nil
+	bc.walReader = nil
+	bc.walWriter = nil
+	bc.stat = nil
+	return nil
 }
 
 // Set 在数据库中添加或更新一个键值对
@@ -73,24 +74,33 @@ func (bc *BitCask) Set(key, value []byte) error {
 // set 写入记录到 WAL 文件并更新内存表
 func (bc *BitCask) set(record *Record) error {
 	bc.lock.Lock()
+	defer bc.lock.Unlock()
 	pos, err := bc.walWriter.Write(record)
+	if err != nil {
+		return err
+	}
 	if bc.opts.alwaySync {
 		if err := bc.walWriter.Sync(); err != nil {
 			return ErrorSync
 		}
 	}
-	if err != nil {
-		bc.lock.Unlock()
-		return err
-	}
+	// 更新统计信息
 	if record.RType == RecordUpdate || record.RType == RecordBatchUpdated {
-		bc.memtable.Set(&RecordPos{Key: record.Key, Value: pos})
+		old := bc.memtable.Set(&RecordPos{Key: record.Key, Value: pos})
+		if old != nil {
+			bc.stat.UselessSize += old.Value.length
+		}
 	}
+	// 删除记录
 	if record.RType == RecordDelete || record.RType == RecordBatchDeleted {
-		bc.memtable.Delete(record.Key)
+		old := bc.memtable.Delete(record.Key)
+		if old != nil {
+			bc.stat.UselessSize += old.Value.length
+		}
+		bc.stat.UselessSize += pos.length
 	}
-	bc.lock.Unlock()
-
+	// 更新统计信息
+	bc.stat.WalFileSize += pos.length
 	bc.tryToFreshMemTable()
 	return nil
 }
@@ -136,41 +146,55 @@ func (bc *BitCask) Query(key []byte) ([]byte, error) {
 }
 
 // Flush 刷新内存表到新的 WAL 文件
-func (bc *BitCask) Flush() error {
-	bc.newWalFile()
+// func (bc *BitCask) Flush() error {
+// 	// 首先检查是否已经在进行 Flush 操作
+// 	bc.isFlushingMu.Lock()
+// 	if bc.isFlushing {
+// 		bc.isFlushingMu.Unlock()
+// 		return errors.New("flush is already in progress")
+// 	}
+// 	bc.isFlushingMu.Unlock()
 
-	var ls []string
-	for _, w := range bc.walReader {
-		ls = append(ls, w.fileName)
-	}
+// 	// 确保在函数结束时重置 isFlushing 标志
+// 	defer func() {
+// 		bc.isFlushingMu.Lock()
+// 		bc.isFlushing = false
+// 		bc.isFlushingMu.Unlock()
+// 	}()
 
-	if err := bc.memtable.Fold(func(key []byte, pos *Pos) error {
-		if v, ok := bc.walReader[pos.fileName]; ok {
-			record, err := v.Restore(pos.offset, pos.length)
-			if err != nil {
-				return err
-			}
-			if err := bc.Set(key, record.Value); err != nil {
-				return err
-			}
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
+// 	bc.newWalFile()
 
-	for _, v := range ls {
-		bc.walReader[v].Clear()
-		delete(bc.walReader, v)
-	}
-	return nil
-}
+// 	var ls []string
+// 	for _, w := range bc.walReader {
+// 		ls = append(ls, w.fileName)
+// 	}
+// 	bc.stat = NewStat()
+
+// 	if err := bc.memtable.Fold(func(key []byte, pos *Pos) error {
+// 		if v, ok := bc.walReader[pos.fileName]; ok {
+// 			record, err := v.Restore(pos.offset, pos.length)
+// 			if err != nil {
+// 				return err
+// 			}
+// 			if err := bc.Set(key, record.Value); err != nil {
+// 				return err
+// 			}
+// 		}
+// 		return nil
+// 	}); err != nil {
+// 		return err
+// 	}
+
+// 	for _, v := range ls {
+// 		bc.walReader[v].Clear()
+// 		delete(bc.walReader, v)
+// 	}
+// 	bc.stat.UselessSize = 0
+// 	return nil
+// }
 
 // newWalFile 创建一个新的 WAL 文件
 func (bc *BitCask) newWalFile() {
-	bc.lock.Lock()
-	defer bc.lock.Unlock()
-
 	oldWalName := bc.walWriter.fileName
 	bc.walWriter.Close()
 	bc.walReader[oldWalName], _ = NewWalReader(oldWalName)
@@ -180,8 +204,8 @@ func (bc *BitCask) newWalFile() {
 
 // LoadWal 加载 WAL 文件
 func (bc *BitCask) LoadWal() error {
-	bc.lock.RLock()
-	defer bc.lock.RUnlock()
+	bc.lock.Lock() // 改为写锁
+	defer bc.lock.Unlock()
 
 	fs, err := os.ReadDir(bc.opts.dirPath)
 	if err != nil {
@@ -217,7 +241,7 @@ func (bc *BitCask) LoadWal() error {
 				return err
 			}
 			bc.walWriter = walWriter
-			seq, offset, err := walWriter.RestoreAll(bc.memtable, txMap)
+			seq, offset, err := walWriter.RestoreAll(bc.memtable, txMap, bc.stat)
 			if err != nil {
 				return err
 			}
@@ -228,7 +252,7 @@ func (bc *BitCask) LoadWal() error {
 			if err != nil {
 				return err
 			}
-			seq, _, err := walReader.RestoreAll(bc.memtable, txMap)
+			seq, _, err := walReader.RestoreAll(bc.memtable, txMap, bc.stat)
 			if err != nil {
 				return err
 			}

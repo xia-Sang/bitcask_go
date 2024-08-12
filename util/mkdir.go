@@ -11,3 +11,10 @@ func MakeDirPath(dirPath string) error {
 	}
 	return nil
 }
+
+func RemoveDir(dirPath string) error {
+	if err := os.RemoveAll(dirPath); err != nil {
+		return err
+	}
+	return nil
+}

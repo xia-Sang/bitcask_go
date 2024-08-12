@@ -38,12 +38,11 @@ func TestMemTable_Set(t *testing.T) {
 	}
 }
 func TestMemTable_Set1(t *testing.T) {
-	opts, err := NewOptions("./data")
+	opts, err := NewOptions("./data", WithMaxSSTSize(1024))
 	assert.Nil(t, err)
 	db, err := NewBitCask(opts)
 	assert.Nil(t, err)
 	t.Log(db)
-	t.Log("db.getMaxWalSize()", db.getMaxWalSize())
 	m := map[string][]byte{}
 	for i := range 200 {
 		key, value := util.GenerateKey(i), util.GenerateRandomBytes(12)
@@ -69,6 +68,62 @@ func TestMemTable_Set1(t *testing.T) {
 		}
 		t.Logf("(%s:%s)", key, val)
 	}
+}
+func TestMemTable_Set9(t *testing.T) {
+	opts, err := NewOptions("./data", WithMaxSSTSize(1024))
+	assert.Nil(t, err)
+	db, err := NewBitCask(opts)
+	assert.Nil(t, err)
+	m := map[string][]byte{}
+	for i := range 2000 {
+		key, value := util.GenerateKey(i), util.GenerateRandomBytes(12)
+		err := db.Set(key, value)
+		assert.Nil(t, err)
+		m[string(key)] = value
+	}
+	for i := 10; i < 1900; i++ {
+		key, _ := util.GenerateKey(i), util.GenerateRandomBytes(12)
+		err := db.Delete(key)
+		assert.Nil(t, err)
+	}
+	for i := range 2000 {
+		key, _ := util.GenerateKey(i), util.GenerateRandomBytes(12)
+		val, err := db.Query(key)
+		if i < 10 || i >= 1900 {
+			assert.Nil(t, err)
+			assert.Equal(t, len(val), 12)
+			assert.Equal(t, m[string(key)], val)
+		} else {
+			assert.NotNil(t, err)
+			assert.Equal(t, err, ErrorNotExist)
+		}
+		// t.Logf("(%s:%s)", key, val)
+	}
+	t.Log(db.stat.String())
+	// err = db.Flush()
+	// assert.Nil(t, err)
+	for i := range 2000 {
+		key, _ := util.GenerateKey(i), util.GenerateRandomBytes(12)
+		val, err := db.Query(key)
+		if i < 10 || i >= 1900 {
+			assert.Nil(t, err)
+			assert.Equal(t, len(val), 12)
+			assert.Equal(t, m[string(key)], val)
+		} else {
+			assert.NotNil(t, err)
+			assert.Equal(t, err, ErrorNotExist)
+		}
+		// t.Logf("(%s:%s)", key, val)
+	}
+	t.Log(db.stat.String())
+	db.Close()
+}
+func TestMemTable_Set8(t *testing.T) {
+	opts, err := NewOptions("./data")
+	assert.Nil(t, err)
+	db, err := NewBitCask(opts)
+	assert.Nil(t, err)
+	t.Log(db)
 }
 func TestMemTable_Set6(t *testing.T) {
 	opts, err := NewOptions("./data")

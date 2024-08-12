@@ -33,12 +33,16 @@ func NewMemTable() *MemTable {
 }
 
 // set
-func (t *MemTable) Set(r *RecordPos) {
+func (t *MemTable) Set(r *RecordPos) *RecordPos {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	t.data.ReplaceOrInsert(r)
-
+	t.size++
+	old := t.data.ReplaceOrInsert(r)
+	if old != nil {
+		return old.(*RecordPos)
+	}
+	return nil
 }
 
 // 查询
@@ -53,13 +57,18 @@ func (t *MemTable) Query(key []byte) *RecordPos {
 	}
 	return found.(*RecordPos)
 }
-func (t *MemTable) Delete(key []byte) {
+func (t *MemTable) Delete(key []byte) *RecordPos {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	t.data.Delete(&RecordPos{
+	old := t.data.Delete(&RecordPos{
 		Key: key,
 	})
+	if old != nil {
+		t.size--
+		return old.(*RecordPos)
+	}
+	return nil
 }
 
 // 获取容量
@@ -98,7 +107,8 @@ func (t *MemTable) Show() {
 
 // 按理来说需要进行加锁访问的
 func (t *MemTable) Fold(f func(key []byte, value *Pos) error) error {
-
+	// t.mu.RLock()
+	// defer t.mu.RUnlock()
 	t.data.Ascend(func(item btree.Item) bool {
 		record := item.(*RecordPos)
 		f(record.Key, record.Value)
